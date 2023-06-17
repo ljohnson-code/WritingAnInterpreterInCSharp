@@ -57,7 +57,9 @@ namespace MonkeyLangInterpreter
         public bool Value;
         public string Inspect()
         {
-            return Value.ToString().ToLower();
+            if (Value)
+                return "true";
+            return "false";
         }
 
         public ObjectType Type()

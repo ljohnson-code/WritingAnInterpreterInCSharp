@@ -53,7 +53,7 @@
 
             Environment env = Environment.NewEnvironment();
             Lexer lexer = new(input);
-            Parser p = new(lexer);
+            Parser p = new(ref lexer);
             AST.Program? program = p.ParseProgram();
 
             if (p.errors.Count != 0)

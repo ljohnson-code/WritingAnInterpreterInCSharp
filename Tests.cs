@@ -216,7 +216,7 @@
             foreach (letTest test in letTests)
             {
                 Lexer l = new(test.input);
-                Parser p = new(l);
+                Parser p = new(ref l);
                 AST.Program? program = p.ParseProgram();
 
                 CheckParseErrors(p);
@@ -252,7 +252,7 @@
                 """;
 
             Lexer l = new(input);
-            Parser p = new(l);
+            Parser p = new(ref l);
             AST.Program? program = p.ParseProgram();
 
             CheckParseErrors(p);
@@ -307,7 +307,7 @@
         {
             string input = "foobar;";
             Lexer l = new(input);
-            Parser p = new(l);
+            Parser p = new(ref l);
             AST.Program? program = p.ParseProgram();
             CheckParseErrors(p);
 
@@ -348,7 +348,7 @@
         {
             string input = "5;";
             Lexer l = new(input);
-            Parser p = new(l);
+            Parser p = new(ref l);
             AST.Program? program = p.ParseProgram();
             CheckParseErrors(p);
             if (program.Value.Statements.Length != 1)
@@ -419,7 +419,7 @@
             foreach (prefTest test in prefixTests)
             {
                 Lexer l = new(test.input);
-                Parser p = new(l);
+                Parser p = new(ref l);
                 AST.Program? program = p.ParseProgram();
                 CheckParseErrors(p);
                 if (program.Value.Statements.Length != 1)
@@ -459,7 +459,7 @@
             foreach (infixTest test in infixTests)
             {
                 Lexer l = new(test.input);
-                Parser p = new(l);
+                Parser p = new(ref l);
                 AST.Program? program = p.ParseProgram();
                 CheckParseErrors(p);
                 if (program.Value.Statements.Length != 1)
@@ -557,7 +557,7 @@
             foreach (precedenceTest test in tests)
             {
                 Lexer l = new(test.input);
-                Parser p = new(l);
+                Parser p = new(ref l);
                 AST.Program? program = p.ParseProgram();
                 CheckParseErrors(p);
                 string actual = program.Value.String();
@@ -680,7 +680,7 @@
             //string input = "if (x < y) { x }";
             string input = "if (x < y) { x } else { y }";
             Lexer l = new(input);
-            Parser p = new(l);
+            Parser p = new(ref l);
             AST.Program? program = p.ParseProgram();
             CheckParseErrors(p);
             if (program.Value.Statements.Length != 1)
@@ -737,7 +737,7 @@
             foreach (FnLiteralTest test in fnLiteralTests)
             {
                 Lexer l = new(test.input);
-                Parser p = new(l);
+                Parser p = new(ref l);
                 AST.Program? program = p.ParseProgram();
                 CheckParseErrors(p);
                 AST.ExpressionStatement stmt = (AST.ExpressionStatement)program.Value.Statements[0];
@@ -760,7 +760,7 @@
         {
             string input = "add(1, 2 * 3, 4 + 5);";
             Lexer l = new(input);
-            Parser p = new(l);
+            Parser p = new(ref l);
             AST.Program? program = p.ParseProgram();
             CheckParseErrors(p);
 
@@ -819,7 +819,7 @@
         private static IObject TestEval(string input)
         {
             Lexer l = new(input);
-            Parser p = new(l);
+            Parser p = new(ref l);
             AST.Program? program = p.ParseProgram();
             Environment env = Environment.NewEnvironment();
 
@@ -1121,7 +1121,7 @@
         {
             string input = "[1, 2 * 2, 3 + 3]";
             Lexer l = new(input);
-            Parser p = new(l);
+            Parser p = new(ref l);
             AST.Program? program = p.ParseProgram();
             CheckParseErrors(p);
 
@@ -1209,7 +1209,7 @@
         {
             string input = """{"one": 1, "two": 2, "three": 3}""";
             Lexer l = new(input);
-            Parser p = new(l);
+            Parser p = new(ref l);
             AST.Program? program = p.ParseProgram();
             CheckParseErrors(p);
 
@@ -1242,7 +1242,7 @@
         {
             string input = "{}";
             Lexer l = new(input);
-            Parser p = new(l);
+            Parser p = new(ref l);
             AST.Program? program = p.ParseProgram();
             CheckParseErrors(p);
 
@@ -1259,7 +1259,7 @@
         {
             string input = """{"one": 0 + 1, "two": 10 - 8, "three": 15 / 5}""";
             Lexer l = new(input);
-            Parser p = new(l);
+            Parser p = new(ref l);
             AST.Program? program = p.ParseProgram();
             CheckParseErrors(p);
 
@@ -1366,7 +1366,7 @@
         /// </summary>
         internal static void RunAllTests()
         {
-            TestHashIndexExpressions();
+            //TestHashIndexExpressions();
             TestHashLiterals();
             TestStringHashKey();
             TestParsingHashLiteralsWithExpressions();

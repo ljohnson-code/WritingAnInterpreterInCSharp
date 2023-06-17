@@ -28,252 +28,237 @@
 
 
         public Lexer l;
-        public Token curToken;
-        public Token peekToken;
+        public Token curToken = new Token();
+        public Token peekToken = new Token();
         public List<string> errors = new();
-        public Dictionary<TokenType, prefixParseFn> prefixParseFns = new();
-        public Dictionary<TokenType, infixParseFn> infixParseFns = new();
-        public Parser(Lexer lexer)
+
+        #region PrefixFns
+        private static Func<Parser, AST.IExpression> parseIdentifier = (Parser p) =>
+        {
+            return new AST.Identifier() { Token = p.curToken, Value = p.curToken.Literal };
+        };
+        
+        private static Func<Parser, AST.IExpression> parseIntegerLiteral = (Parser p) =>
+        {
+
+            AST.IntegerLiteral lit = new() { Token = p.curToken };
+            long value;
+            if (long.TryParse(p.curToken.Literal, out value))
+            {
+                lit.Value = value;
+                return lit;
+            }
+            string msg = $"Could not parse {p.curToken.Literal} as integer";
+            p.errors.Add(msg);
+            return null;
+
+        };
+        
+        private static Func<Parser, AST.IExpression> parsePrefixExpression = (Parser p) =>
+        {
+            AST.PrefixExpression expression = new() { Token = p.curToken, Operator = p.curToken.Literal };
+            p.NextToken();
+            expression.Right = p.ParseExpression((int)PrecedenceType.PREFIX);
+
+            return expression;
+        };
+        private static Func<Parser, AST.IExpression> parseBoolean = (Parser p) =>
+        {
+            return new AST.Boolean() { Token = p.curToken, Value = p.CurTokenIs(TokenType.TRUE) };
+        };
+        private static Func<Parser, AST.IExpression> parseGroupedExpression = (Parser p) =>
+        {
+            p.NextToken();
+            AST.IExpression? exp = p.ParseExpression((int)PrecedenceType.LOWEST);
+            if (!p.ExpectPeek(TokenType.RPAREN))
+            {
+                return null;
+            }
+            return exp;
+        };
+
+        private static Func<Parser, AST.IExpression> parseIfExpression = (Parser p) =>
+        {
+            AST.IfExpression expression = new() { Token = p.curToken };
+            if (!p.ExpectPeek(TokenType.LPAREN))
+            {
+                return null;
+            }
+            p.NextToken();
+            expression.Condition = p.ParseExpression((int)PrecedenceType.LOWEST);
+            if (!p.ExpectPeek(TokenType.RPAREN))
+            {
+                return null;
+            }
+            if (!p.ExpectPeek(TokenType.LBRACE))
+            {
+                return null;
+            }
+
+            expression.Consequence = p.ParseBlockStatement();
+
+            if (p.PeekTokenIs(TokenType.ELSE))
+            {
+                p.NextToken();
+
+                if (!p.ExpectPeek(TokenType.LBRACE))
+                {
+                    return null;
+                }
+                expression.Alternative = p.ParseBlockStatement();
+            }
+
+            return expression;
+        };
+        private static Func<Parser, AST.IExpression> parseFunctionLiteral = (Parser p) =>
+        {
+            AST.FunctionLiteral lit = new() { Token = p.curToken };
+            if (!p.ExpectPeek(TokenType.LPAREN))
+            {
+                return null;
+            }
+
+            lit.Parameters = p.ParseFunctionParameters();
+
+            if (!p.ExpectPeek(TokenType.LBRACE))
+            {
+                return null;
+            }
+
+            lit.Body = p.ParseBlockStatement();
+
+            return lit;
+        };
+        private static Func<Parser, AST.IExpression> parseHashLiteral = (Parser p) =>
+        {
+            AST.HashLiteral hash = new()
+            {
+                Pairs = new Dictionary<AST.IExpression, AST.IExpression>()
+            };
+
+            while (!p.PeekTokenIs(TokenType.RBRACE))
+            {
+                p.NextToken();
+                AST.IExpression? key = p.ParseExpression((int)PrecedenceType.LOWEST);
+                if (!p.ExpectPeek(TokenType.COLON))
+                {
+                    return null;
+                }
+                p.NextToken();
+                AST.IExpression? value = p.ParseExpression((int)PrecedenceType.LOWEST);
+                hash.Pairs.Add(key, value);
+
+                if (!p.PeekTokenIs(TokenType.RBRACE) && !p.ExpectPeek(TokenType.COMMA))
+                {
+                    return null;
+                }
+
+            }
+
+            if (!p.ExpectPeek(TokenType.RBRACE))
+            {
+                return null;
+            }
+
+            return hash;
+        };
+        private static Func<Parser, AST.IExpression> parseArrayLiteral = (Parser p) =>
+        {
+            AST.ArrayLiteral array = new()
+            {
+                Token = p.curToken,
+                Elements = p.ParseExpressionList(TokenType.RBRACKET)
+            };
+            return array;
+        };
+        private static Func<Parser, AST.IExpression> parseStringLiteral = (Parser p) =>
+        {
+            return new AST.StringLiteral() { Token = p.curToken, Value = p.curToken.Literal };
+        };        
+
+        #endregion
+
+
+        #region  Infix
+        private static Func<Parser, AST.IExpression, AST.IExpression> parseCallExpression = (Parser p, AST.IExpression function) =>
+        {
+            AST.CallExpression exp = new()
+            {
+                Token = p.curToken,
+                Function = function,
+                Arguments = p.ParseExpressionList(TokenType.RPAREN)
+            };
+
+            return exp;
+        };
+
+        private static Func<Parser, AST.IExpression, AST.IExpression> parseIndexExpression = (Parser p, AST.IExpression left) =>
+        {
+            AST.IndexExpression exp = new() { Token = p.curToken, Left = left };
+            p.NextToken();
+
+            exp.Index = p.ParseExpression((int)PrecedenceType.LOWEST);
+            if (!p.ExpectPeek(TokenType.RBRACKET))
+            {
+                return null;
+            }
+
+            return exp;
+        };
+        
+        private static Func<Parser, AST.IExpression, AST.IExpression> parseInfixExpression = (Parser p, AST.IExpression left) =>
+        {
+            AST.InfixExpression expression = new()
+            {
+                Token = p.curToken,
+                Operator = p.curToken.Literal,
+                Left = left
+            };
+            int precedence = p.CurPrecedence();
+            p.NextToken();
+
+            expression.Right = p.ParseExpression(precedence);
+
+            return expression;
+        };
+        
+        #endregion
+
+        public static Dictionary<TokenType, prefixParseFn> prefixParseFns = new Dictionary<TokenType, prefixParseFn>()
+        {
+            { TokenType.IDENT, new prefixParseFn() { fn = parseIdentifier }},
+           {TokenType.INT, new prefixParseFn() { fn = parseIntegerLiteral }},
+           {TokenType.BANG, new prefixParseFn() { fn = parsePrefixExpression }},
+           {TokenType.MINUS, new prefixParseFn() { fn = parsePrefixExpression }},
+           {TokenType.TRUE, new prefixParseFn() { fn = parseBoolean }},
+           {TokenType.FALSE, new prefixParseFn() { fn = parseBoolean }},
+           {TokenType.LPAREN, new prefixParseFn() { fn = parseGroupedExpression }},
+           {TokenType.IF, new prefixParseFn() { fn = parseIfExpression }},
+           {TokenType.FUNCTION, new prefixParseFn() { fn = parseFunctionLiteral }},
+           {TokenType.STRING, new prefixParseFn() { fn = parseStringLiteral }},
+           {TokenType.LBRACKET, new prefixParseFn() { fn = parseArrayLiteral }},
+           {TokenType.LBRACE, new prefixParseFn() { fn = parseHashLiteral }}
+            
+        };
+        public static Dictionary<TokenType, infixParseFn> infixParseFns = new Dictionary<TokenType, infixParseFn>()
+        {
+           { TokenType.LBRACKET, new infixParseFn() { fn = parseIndexExpression }},
+           { TokenType.LPAREN, new infixParseFn() { fn = parseCallExpression }},
+          {TokenType.PLUS, new infixParseFn() { fn = parseInfixExpression }},
+          {TokenType.MINUS, new infixParseFn() { fn = parseInfixExpression }},
+          {TokenType.SLASH, new infixParseFn() { fn = parseInfixExpression }},
+          {TokenType.ASTERISK, new infixParseFn() { fn = parseInfixExpression }},
+          {TokenType.EQ, new infixParseFn() { fn = parseInfixExpression }},
+          {TokenType.NOT_EQ, new infixParseFn() { fn = parseInfixExpression }},
+          {TokenType.LT, new infixParseFn() { fn = parseInfixExpression }},
+          {TokenType.GT, new infixParseFn() { fn = parseInfixExpression }},
+        };
+        
+        public Parser(ref Lexer lexer)
         {
             l = lexer;
-            curToken = new Token();
-            peekToken = new Token();
             NextToken();
             NextToken();
-
-            #region Prefix
-            Func<Parser, AST.IExpression> parseIdentifier = (Parser p) =>
-            {
-                return new AST.Identifier() { Token = p.curToken, Value = p.curToken.Literal };
-            };
-            RegisterPrefix(TokenType.IDENT, new prefixParseFn() { fn = parseIdentifier });
-
-
-            Func<Parser, AST.IExpression> parseIntegerLiteral = (Parser p) =>
-            {
-
-                AST.IntegerLiteral lit = new() { Token = p.curToken };
-                long value;
-                if (long.TryParse(p.curToken.Literal, out value))
-                {
-                    lit.Value = value;
-                    return lit;
-                }
-                string msg = $"Could not parse {p.curToken.Literal} as integer";
-                p.errors.Add(msg);
-                return null;
-
-            };
-
-            RegisterPrefix(TokenType.INT, new prefixParseFn() { fn = parseIntegerLiteral });
-
-
-            Func<Parser, AST.IExpression> parsePrefixExpression = (Parser p) =>
-            {
-                AST.PrefixExpression expression = new() { Token = p.curToken, Operator = p.curToken.Literal };
-                p.NextToken();
-                expression.Right = p.ParseExpression((int)PrecedenceType.PREFIX);
-
-                return expression;
-            };
-
-            RegisterPrefix(TokenType.BANG, new prefixParseFn() { fn = parsePrefixExpression });
-            RegisterPrefix(TokenType.MINUS, new prefixParseFn() { fn = parsePrefixExpression });
-
-            Func<Parser, AST.IExpression> parseBoolean = (Parser p) =>
-            {
-                return new AST.Boolean() { Token = p.curToken, Value = p.CurTokenIs(TokenType.TRUE) };
-            };
-
-            RegisterPrefix(TokenType.TRUE, new prefixParseFn() { fn = parseBoolean });
-            RegisterPrefix(TokenType.FALSE, new prefixParseFn() { fn = parseBoolean });
-
-            Func<Parser, AST.IExpression> parseGroupedExpression = (Parser p) =>
-            {
-                p.NextToken();
-                AST.IExpression? exp = p.ParseExpression((int)PrecedenceType.LOWEST);
-                if (!p.ExpectPeek(TokenType.RPAREN))
-                {
-                    return null;
-                }
-                return exp;
-            };
-
-            RegisterPrefix(TokenType.LPAREN, new prefixParseFn() { fn = parseGroupedExpression });
-
-            Func<Parser, AST.IExpression> parseIfExpression = (Parser p) =>
-            {
-                AST.IfExpression expression = new() { Token = p.curToken };
-                if (!p.ExpectPeek(TokenType.LPAREN))
-                {
-                    return null;
-                }
-                p.NextToken();
-                expression.Condition = p.ParseExpression((int)PrecedenceType.LOWEST);
-                if (!p.ExpectPeek(TokenType.RPAREN))
-                {
-                    return null;
-                }
-                if (!p.ExpectPeek(TokenType.LBRACE))
-                {
-                    return null;
-                }
-
-                expression.Consequence = p.ParseBlockStatement();
-
-                if (p.PeekTokenIs(TokenType.ELSE))
-                {
-                    p.NextToken();
-
-                    if (!p.ExpectPeek(TokenType.LBRACE))
-                    {
-                        return null;
-                    }
-                    expression.Alternative = p.ParseBlockStatement();
-                }
-
-                return expression;
-            };
-
-            RegisterPrefix(TokenType.IF, new prefixParseFn() { fn = parseIfExpression });
-
-            Func<Parser, AST.IExpression> parseFunctionLiteral = (Parser p) =>
-            {
-                AST.FunctionLiteral lit = new() { Token = p.curToken };
-                if (!p.ExpectPeek(TokenType.LPAREN))
-                {
-                    return null;
-                }
-
-                lit.Parameters = p.ParseFunctionParameters();
-
-                if (!p.ExpectPeek(TokenType.LBRACE))
-                {
-                    return null;
-                }
-
-                lit.Body = p.ParseBlockStatement();
-
-                return lit;
-            };
-
-            RegisterPrefix(TokenType.FUNCTION, new prefixParseFn() { fn = parseFunctionLiteral });
-
-
-            Func<Parser, AST.IExpression> parseStringLiteral = (Parser p) =>
-            {
-                return new AST.StringLiteral() { Token = curToken, Value = curToken.Literal };
-            };
-
-            RegisterPrefix(TokenType.STRING, new prefixParseFn() { fn = parseStringLiteral });
-
-            Func<Parser, AST.IExpression> parseArrayLiteral = (Parser p) =>
-            {
-                AST.ArrayLiteral array = new()
-                {
-                    Token = curToken,
-                    Elements = ParseExpressionList(TokenType.RBRACKET)
-                };
-                return array;
-            };
-
-            RegisterPrefix(TokenType.LBRACKET, new prefixParseFn() { fn = parseArrayLiteral });
-
-            Func<Parser, AST.IExpression> parseHashLiteral = (Parser p) =>
-            {
-                AST.HashLiteral hash = new()
-                {
-                    Pairs = new Dictionary<AST.IExpression, AST.IExpression>()
-                };
-
-                while (!p.PeekTokenIs(TokenType.RBRACE))
-                {
-                    p.NextToken();
-                    AST.IExpression? key = p.ParseExpression((int)PrecedenceType.LOWEST);
-                    if (!p.ExpectPeek(TokenType.COLON))
-                    {
-                        return null;
-                    }
-                    p.NextToken();
-                    AST.IExpression? value = p.ParseExpression((int)PrecedenceType.LOWEST);
-                    hash.Pairs.Add(key, value);
-
-                    if (!p.PeekTokenIs(TokenType.RBRACE) && !p.ExpectPeek(TokenType.COMMA))
-                    {
-                        return null;
-                    }
-
-                }
-
-                if (!p.ExpectPeek(TokenType.RBRACE))
-                {
-                    return null;
-                }
-
-                return hash;
-            };
-
-            RegisterPrefix(TokenType.LBRACE, new prefixParseFn() { fn = parseHashLiteral });
-
-            #endregion
-
-            #region InfixExpressions
-            Func<Parser, AST.IExpression, AST.IExpression> parseInfixExpression = (Parser p, AST.IExpression left) =>
-            {
-                AST.InfixExpression expression = new()
-                {
-                    Token = p.curToken,
-                    Operator = p.curToken.Literal,
-                    Left = left
-                };
-                int precedence = p.CurPrecedence();
-                p.NextToken();
-
-                expression.Right = p.ParseExpression(precedence);
-
-                return expression;
-            };
-            RegisterInfix(TokenType.PLUS, new infixParseFn() { fn = parseInfixExpression });
-            RegisterInfix(TokenType.MINUS, new infixParseFn() { fn = parseInfixExpression });
-            RegisterInfix(TokenType.SLASH, new infixParseFn() { fn = parseInfixExpression });
-            RegisterInfix(TokenType.ASTERISK, new infixParseFn() { fn = parseInfixExpression });
-            RegisterInfix(TokenType.EQ, new infixParseFn() { fn = parseInfixExpression });
-            RegisterInfix(TokenType.NOT_EQ, new infixParseFn() { fn = parseInfixExpression });
-            RegisterInfix(TokenType.LT, new infixParseFn() { fn = parseInfixExpression });
-            RegisterInfix(TokenType.GT, new infixParseFn() { fn = parseInfixExpression });
-
-
-            Func<Parser, AST.IExpression, AST.IExpression> parseCallExpression = (Parser p, AST.IExpression function) =>
-            {
-                AST.CallExpression exp = new()
-                {
-                    Token = p.curToken,
-                    Function = function,
-                    Arguments = p.ParseExpressionList(TokenType.RPAREN)
-                };
-
-                return exp;
-            };
-
-            RegisterInfix(TokenType.LPAREN, new infixParseFn() { fn = parseCallExpression });
-
-
-            Func<Parser, AST.IExpression, AST.IExpression> parseIndexExpression = (Parser p, AST.IExpression left) =>
-            {
-                AST.IndexExpression exp = new() { Token = p.curToken, Left = left };
-                p.NextToken();
-
-                exp.Index = p.ParseExpression((int)PrecedenceType.LOWEST);
-                if (!p.ExpectPeek(TokenType.RBRACKET))
-                {
-                    return null;
-                }
-
-                return exp;
-            };
-            RegisterInfix(TokenType.LBRACKET, new infixParseFn() { fn = parseIndexExpression });
-
-            #endregion
         }
 
         public AST.IExpression[] ParseExpressionList(TokenType end)

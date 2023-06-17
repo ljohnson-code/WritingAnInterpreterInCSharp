@@ -22,7 +22,7 @@
                     continue;
                 }
                 Lexer lexer = new(s);
-                Parser p = new(lexer);
+                Parser p = new(ref lexer);
                 AST.Program? program = p.ParseProgram();
 
                 if (p.errors.Count != 0)
